@@ -29,6 +29,8 @@ The transport never imports UI code. The board never parses protocol messages. `
 5. Outcomes are matched by `eventId + sourceMarketKey + sourceOutcomeCode`.
 6. Vue receives one array invalidation after the batch, not one component update per field.
 
+The row registry keeps an `eventId -> row` map and the outcome patch index keeps a composite-key map. Structural changes rebuild both indexes; high-frequency outcome updates do not scan the rendered row collection.
+
 ## Low-frequency path
 
 `topic_delta.ops` owns collection membership, ordering, metadata, and event status. Full rows are accepted only as seeds for newly inserted or previously unknown events. Odds-only changes do not replace collections.
@@ -55,3 +57,5 @@ In production, intermediate prices for the same outcome should be coalesced to t
 - Keep normal packets below 64 KiB even when the safety ceiling is larger.
 - Track message rate, bytes, coalescing ratio, queue latency, buffered bytes, sequence gaps, and resync count.
 - Keep visible live odds below 250ms end-to-end p95.
+
+The mock gateway exposes the implemented subset through `/health` and Prometheus-style `/metrics`. `pnpm test` covers protocol recovery, stable outcome identity, and backpressure boundaries; `pnpm benchmark` provides a repeatable lookup comparison.

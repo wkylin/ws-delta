@@ -13,6 +13,8 @@
     "dev:frontend": "vite --host 0.0.0.0 --port 5180",
     "dev:server": "tsx watch server/src/index.ts",
     "server": "tsx server/src/index.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "benchmark": "tsx scripts/benchmark-index.ts",
     "build": "vite build",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json && tsc --noEmit -p server/tsconfig.json"
   },

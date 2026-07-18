@@ -13,6 +13,8 @@
 - 通过 `eventId + sourceMarketKey + sourceOutcomeCode` 定位增量，避免依赖展示文案。
 - 支持订阅范围上报，服务端根据已加载和可见赛事缩小推送范围。
 - 内置实时日志面板、背压控制和序列缺口模拟端点。
+- 客户端使用 `eventId -> row` 与复合 outcome key 索引，避免高频增量更新时线性扫描赛事列表。
+- 提供 `/metrics` Prometheus 风格指标，以及协议单测、WebSocket 集成测试和索引基准。
 - 看板筛选、赛事列表和下拉框均为独立 Vue 组件；主市场下拉支持键盘导航与 ARIA `listbox` 语义。
 
 ## 环境要求
@@ -49,6 +51,12 @@ pnpm typecheck
 
 # 构建前端静态资源
 pnpm build
+
+# 运行协议、索引和 WebSocket 集成测试
+pnpm test
+
+# 运行固定规模的线性查找 / Map 查找基准
+pnpm benchmark
 
 # 仅启动服务端
 pnpm server
@@ -99,6 +107,7 @@ subscribe
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | `GET` | `/health` | 服务状态、连接数和协议版本 |
+| `GET` | `/metrics` | Prometheus 风格的实时网关运行指标 |
 | `GET` | `/v1/home/main-board` | 获取当前筛选条件下的看板 HTTP 数据 |
 | `GET` | `/api/mock/realtime/state` | 查看连接、订阅范围与 mock 数据状态 |
 | `GET` | `/api/mock/realtime/debug/home-board` | 查看解析后的看板查询条件 |
@@ -116,6 +125,17 @@ curl -X POST http://127.0.0.1:8088/api/mock/realtime/controls/seq-gap \
 ```
 
 调试接口用于本地 mock 与集成测试；部署时应通过网络访问控制限制其可见范围。
+
+## 可观测性与验证
+
+`/health` 返回连接数、订阅数和当前网关指标；`/metrics` 返回可被 Prometheus 抓取的文本指标，覆盖消息量、字节数、重同步、背压、丢弃增量和慢消费者断开。
+
+```bash
+pnpm test
+pnpm benchmark
+```
+
+基准脚本固定生成 2,000 个赛事和每场 12 个 outcome，对比线性查找与复合 `Map` 索引查找，并校验两种实现的结果一致。
 
 ## 配置
 

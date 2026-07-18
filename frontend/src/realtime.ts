@@ -1,4 +1,5 @@
 import { computed, onBeforeUnmount, reactive, ref } from "vue";
+import { BoardLookupIndex } from "./boardLookupIndex";
 import type {
   BoardRow,
   BoardGroup,
@@ -101,6 +102,7 @@ export function useRealtimeBoard() {
   let reconnectAttempt = 0;
   let stopped = false;
   let logId = 0;
+  const lookup = new BoardLookupIndex();
 
   const endpoint =
     (import.meta.env.VITE_WS_URL as string | undefined)?.trim() ||
@@ -153,6 +155,7 @@ export function useRealtimeBoard() {
   function subscribe() {
     currentSeq.value = 0;
     rows.value = [];
+    lookup.rebuild(rows.value);
     send({ type: "subscribe", items: [activeTopic.value] });
   }
 
@@ -262,13 +265,14 @@ export function useRealtimeBoard() {
       }
     }
     rows.value = Array.from(current.values());
+    lookup.rebuild(rows.value);
     return nextRows.length;
   }
 
   function orderRows(ids: unknown[]) {
-    const current = new Map(rows.value.map((row) => [eventIdOf(row), row]));
-    const ordered = ids.map(text).map((id) => current.get(id)).filter((row): row is BoardRow => Boolean(row));
+    const ordered = ids.map(text).map((id) => lookup.row(id)).filter((row): row is BoardRow => Boolean(row));
     rows.value = ordered;
+    lookup.rebuild(rows.value);
   }
 
   function applyTopicOps(ops: unknown[]) {
@@ -280,23 +284,25 @@ export function useRealtimeBoard() {
       } else if (op === "remove_item") {
         const id = text(value.eventId);
         rows.value = rows.value.filter((row) => eventIdOf(row) !== id);
+        lookup.rebuild(rows.value);
       } else if (op === "insert_item" && value.row) {
         registerRows([value.row]);
         const id = text(value.eventId);
         const index = Math.max(0, numberValue(value.index) ?? rows.value.length);
-        const row = rows.value.find((entry) => eventIdOf(entry) === id);
+        const row = lookup.row(id);
         if (row) {
           rows.value = rows.value.filter((entry) => eventIdOf(entry) !== id);
           rows.value.splice(index, 0, row);
+          lookup.rebuild(rows.value);
         }
       } else if (op === "patch_item_meta") {
         if (value.row) registerRows([value.row]);
         const id = text(value.eventId);
-        const row = rows.value.find((entry) => eventIdOf(entry) === id);
+        const row = lookup.row(id);
         if (row && isRecord(value.meta)) Object.assign(row, value.meta);
       } else if (op === "patch_event_status") {
         const id = text(value.eventId);
-        const row = rows.value.find((entry) => eventIdOf(entry) === id);
+        const row = lookup.row(id);
         if (row) {
           if (isRecord(value.score)) {
             const home = numberValue(value.score.home);
@@ -360,12 +366,10 @@ export function useRealtimeBoard() {
       const eventId = text(change.eventId);
       const sourceMarketKey = text(change.sourceMarketKey);
       const sourceOutcomeCode = text(change.sourceOutcomeCode);
-      const row = rows.value.find((entry) => eventIdOf(entry) === eventId);
-      if (!row) continue;
-      const market = row.markets.find(
-        (entry) =>
-          text(entry.sourceMarketKey) === sourceMarketKey &&
-          text(entry.sourceOutcomeCode || entry.key) === sourceOutcomeCode,
+      const market = lookup.market(
+        eventId,
+        sourceMarketKey,
+        sourceOutcomeCode,
       );
       if (!market) continue;
       const next = numberValue(change.odds ?? change.oddsDecimal);

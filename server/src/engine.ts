@@ -33,8 +33,14 @@ export class MockRealtimeEngine {
       heartbeatMs: this.config.heartbeatMs,
       connections: this.gateway.connectionCount(),
       topicsTracked: this.gateway.topicCount(),
+      metrics: this.gateway.metricsSnapshot(),
       serverTime: nowIso(),
     };
+  }
+
+  handleMetrics(ctx: Context): void {
+    ctx.type = "text/plain; version=0.0.4; charset=utf-8";
+    ctx.body = this.gateway.prometheusMetrics();
   }
 
   handleDebugState(ctx: Context): void {

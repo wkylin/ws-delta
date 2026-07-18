@@ -21,6 +21,8 @@ import {
   type TopicDeltaMessage,
 } from "../protocol";
 import { BoardStore } from "./boardStore";
+import { decideSend } from "./backpressure";
+import { GatewayMetrics, formatPrometheusMetrics, type GatewayMetricsSnapshot } from "./metrics";
 import type { ConnectionState, MockRealtimeConfig } from "./types";
 
 const MAX_SEQUENCE = 1_000_000_000_000;
@@ -43,6 +45,7 @@ export class WsGateway {
   private readonly connectionBySocket = new WeakMap<WebSocket, ConnectionState>();
   private readonly sequences = new Map<string, number>();
   private readonly seqGaps = new Map<string, number>();
+  private readonly metrics = new GatewayMetrics();
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
   private outcomeTimer: NodeJS.Timeout | null = null;
@@ -80,6 +83,15 @@ export class WsGateway {
 
   connectionCount(): number { return this.connections.size; }
   topicCount(): number { return this.sequences.size; }
+  metricsSnapshot(): GatewayMetricsSnapshot {
+    const connections = Array.from(this.connections.values());
+    return this.metrics.snapshot(
+      connections.length,
+      connections.reduce((sum, connection) => sum + connection.subscribedTopics.size, 0),
+      connections.map((connection) => connection.ws.bufferedAmount),
+    );
+  }
+  prometheusMetrics(): string { return formatPrometheusMetrics(this.metricsSnapshot()); }
   debugConnections(): unknown[] {
     return Array.from(this.connections.values()).map((connection) => ({ id: connection.id, helloReceived: connection.helloReceived, topics: Array.from(connection.subscribedTopics.values()), ranges: Object.fromEntries(connection.ranges) }));
   }
@@ -87,7 +99,7 @@ export class WsGateway {
   forceSeqGap(item: HomeBoardTopicItem, skip: number): boolean {
     const key = getTopicKey(item);
     if (!Array.from(this.connections.values()).some((connection) => connection.subscribedTopics.has(key))) return false;
-    this.seqGaps.set(key, skip); return true;
+    this.seqGaps.set(key, skip); this.metrics.sequenceGap(skip); return true;
   }
 
   sendBackpressure(retryAfterMs: number, actions: string[]): void {
@@ -120,15 +132,17 @@ export class WsGateway {
 
   private handleConnection(ws: WebSocket): void {
     const connection: ConnectionState = { id: `conn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`, ws, helloReceived: !this.config.requireHello, authenticated: !this.config.requireHello, helloTimeoutTimer: null, subscribedTopics: new Map(), ranges: new Map(), isAlive: true, droppedRecoverableMessages: 0, backpressureNotified: false };
+    this.metrics.connectionOpened();
     this.connections.set(connection.id, connection); this.connectionBySocket.set(ws, connection); this.armHelloTimer(connection);
     ws.on("message", (buffer: RawData, binary: boolean) => this.receive(connection, buffer, binary));
     ws.on("pong", () => { connection.isAlive = true; });
-    ws.on("close", () => { this.clearHelloTimer(connection); this.connections.delete(connection.id); this.clearSequences(connection.id); });
+    ws.on("close", () => { this.metrics.connectionClosed(); this.clearHelloTimer(connection); this.connections.delete(connection.id); this.clearSequences(connection.id); });
     ws.on("error", (error) => console.warn(`[mock-realtime] WebSocket ${connection.id} error`, error.message));
     if (!this.config.requireHello) this.send(ws, this.ready(connection.id));
   }
 
   private receive(connection: ConnectionState, buffer: RawData, binary: boolean): void {
+    this.metrics.inbound(Buffer.byteLength(buffer.toString()));
     if (binary) { this.fail(connection, "BINARY_NOT_SUPPORTED", "Binary frames are not supported", 1003); return; }
     let value: unknown;
     try { value = JSON.parse(buffer.toString()); } catch { this.fail(connection, "INVALID_JSON", "Invalid JSON payload", 1007); return; }
@@ -172,6 +186,7 @@ export class WsGateway {
   }
 
   private resync(connection: ConnectionState, rawItems?: unknown[]): void {
+    this.metrics.resync();
     const items = this.normalizeItems(connection, rawItems, "resync"); if (!items) return;
     for (const item of items) connection.subscribedTopics.has(getTopicKey(item)) ? this.sendSnapshot(connection, item) : this.sendError(connection, "TOPIC_NOT_SUBSCRIBED", "Cannot resync a topic that is not subscribed", { item });
   }
@@ -226,10 +241,10 @@ export class WsGateway {
     if (ws.readyState !== WebSocket.OPEN) return false;
     const encoded = JSON.stringify(message); const bytes = Buffer.byteLength(encoded); const connection = this.connectionBySocket.get(ws); const recoverable = message.type === "topic_delta" || message.type === "outcome_delta";
     if (bytes > this.config.maxServerMessageBytes) { if (recoverable) this.backpressure(ws); else ws.close(1011, "Server message exceeds advertised limit"); return false; }
-    const projected = ws.bufferedAmount + bytes;
-    if (projected >= this.config.bufferedAmountCloseBytes) { ws.close(1013, "Slow consumer"); return false; }
-    if (recoverable && projected >= this.config.bufferedAmountHighWaterBytes) { if (connection) { connection.droppedRecoverableMessages += 1; if (!connection.backpressureNotified) { connection.backpressureNotified = true; this.backpressure(ws); } if (connection.droppedRecoverableMessages >= this.config.maxRecoverableDrops) ws.close(1013, "Slow consumer"); } return false; }
-    ws.send(encoded); return true;
+    const decision = decideSend(ws.bufferedAmount, bytes, recoverable, this.config);
+    if (decision === "close_slow_consumer") { this.metrics.slowConsumer(); ws.close(1013, "Slow consumer"); return false; }
+    if (decision === "drop_recoverable") { this.metrics.recoverableDrop(); if (connection) { connection.droppedRecoverableMessages += 1; if (!connection.backpressureNotified) { connection.backpressureNotified = true; this.backpressure(ws); } if (connection.droppedRecoverableMessages >= this.config.maxRecoverableDrops) { this.metrics.slowConsumer(); ws.close(1013, "Slow consumer"); } } return false; }
+    ws.send(encoded); this.metrics.outbound(message.type, bytes); return true;
   }
-  private backpressure(ws: WebSocket): void { const message: BackpressureMessage = { type: "backpressure", protocolVersion: REALTIME_PROTOCOL_VERSION, serverTime: nowIso(), traceId: traceId("backpressure"), retryAfterMs: Math.max(500, this.config.pingIntervalMs), actions: ["resync", "reduce_range"], scope: "connection" }; if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount + Buffer.byteLength(JSON.stringify(message)) < this.config.bufferedAmountCloseBytes) ws.send(JSON.stringify(message)); }
+  private backpressure(ws: WebSocket): void { const message: BackpressureMessage = { type: "backpressure", protocolVersion: REALTIME_PROTOCOL_VERSION, serverTime: nowIso(), traceId: traceId("backpressure"), retryAfterMs: Math.max(500, this.config.pingIntervalMs), actions: ["resync", "reduce_range"], scope: "connection" }; const encoded = JSON.stringify(message); const bytes = Buffer.byteLength(encoded); if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount + bytes < this.config.bufferedAmountCloseBytes) { ws.send(encoded); this.metrics.backpressure(); this.metrics.outbound(message.type, bytes); } }
 }
