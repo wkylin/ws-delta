@@ -15,6 +15,7 @@
 - 内置实时日志面板、背压控制和序列缺口模拟端点。
 - 客户端使用 `eventId -> row` 与复合 outcome key 索引，避免高频增量更新时线性扫描赛事列表。
 - 提供 `/metrics` Prometheus 风格指标，以及协议单测、WebSocket 集成测试和索引基准。
+- 前端协议 inspector 内置 Gateway runtime 面板，定时读取 `/metrics` 并展示吞吐、恢复和背压状态。
 - 看板筛选、赛事列表和下拉框均为独立 Vue 组件；主市场下拉支持键盘导航与 ARIA `listbox` 语义。
 
 ## 环境要求

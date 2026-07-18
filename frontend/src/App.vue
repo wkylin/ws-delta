@@ -88,6 +88,8 @@
           <code :title="topicKey">{{ shortTopicKey }}</code>
         </div>
 
+        <GatewayMetrics :web-socket-endpoint="endpoint" />
+
         <div class="traffic-grid">
           <button type="button" @click="resetStats">
             <span>Messages</span><strong>{{ stats.messages }}</strong>
@@ -141,6 +143,7 @@
 import { computed } from "vue";
 import { RefreshCw, Trash2 } from "lucide-vue-next";
 import OddsBoard from "./OddsBoard.vue";
+import GatewayMetrics from "./components/GatewayMetrics.vue";
 import { useRealtimeBoard } from "./realtime";
 
 const {
