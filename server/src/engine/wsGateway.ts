@@ -22,7 +22,8 @@ import {
 } from "../protocol";
 import { BoardStore } from "./boardStore";
 import { decideSend } from "./backpressure";
-import { GatewayMetrics, formatPrometheusMetrics, type GatewayMetricsSnapshot } from "./metrics";
+import { GatewayMetrics, PrometheusExporter, type GatewayMetricsSnapshot } from "./metrics";
+import { createRealtimeBus, createSnapshotStore, type RealtimeBus, type RealtimeEvent, type SnapshotStore } from "../distributed";
 import type { ConnectionState, MockRealtimeConfig } from "./types";
 
 const MAX_SEQUENCE = 1_000_000_000_000;
@@ -46,6 +47,10 @@ export class WsGateway {
   private readonly sequences = new Map<string, number>();
   private readonly seqGaps = new Map<string, number>();
   private readonly metrics = new GatewayMetrics();
+  private readonly prometheus = new PrometheusExporter();
+  private readonly bus: RealtimeBus;
+  private readonly snapshots: SnapshotStore;
+  private distributedStarted = false;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
   private outcomeTimer: NodeJS.Timeout | null = null;
@@ -54,6 +59,9 @@ export class WsGateway {
   constructor(private readonly config: MockRealtimeConfig, private readonly board: BoardStore) {
     this.wss = new WebSocketServer({ noServer: true, maxPayload: config.maxClientMessageBytes, perMessageDeflate: false });
     this.wss.on("connection", (ws: WebSocket) => this.handleConnection(ws));
+    const options = { instanceId: config.instanceId, ...config.distributed };
+    this.bus = createRealtimeBus(options);
+    this.snapshots = createSnapshotStore(options);
   }
 
   attach(server: Server): void {
@@ -68,6 +76,7 @@ export class WsGateway {
   }
 
   start(): void {
+    void this.startDistributed();
     if (!this.heartbeatTimer && this.config.heartbeatMs > 0) this.heartbeatTimer = setInterval(() => this.heartbeat(), this.config.heartbeatMs);
     if (!this.pingTimer) this.pingTimer = setInterval(() => this.checkLiveness(), this.config.pingIntervalMs);
     if (!this.outcomeTimer) this.outcomeTimer = setInterval(() => this.emitOutcomeBatch(), 800);
@@ -79,6 +88,8 @@ export class WsGateway {
     this.heartbeatTimer = this.pingTimer = this.outcomeTimer = this.collectionTimer = null;
     for (const connection of this.connections.values()) { this.clearHelloTimer(connection); connection.ws.close(); }
     this.connections.clear(); this.sequences.clear(); this.seqGaps.clear();
+    void this.bus.stop();
+    void this.snapshots.stop();
   }
 
   connectionCount(): number { return this.connections.size; }
@@ -91,7 +102,8 @@ export class WsGateway {
       connections.map((connection) => connection.ws.bufferedAmount),
     );
   }
-  prometheusMetrics(): string { return formatPrometheusMetrics(this.metricsSnapshot()); }
+  prometheusMetrics(): Promise<string> { return this.prometheus.render(this.metricsSnapshot()); }
+  distributedMode(): string { return this.bus.mode; }
   debugConnections(): unknown[] {
     return Array.from(this.connections.values()).map((connection) => ({ id: connection.id, helloReceived: connection.helloReceived, topics: Array.from(connection.subscribedTopics.values()), ranges: Object.fromEntries(connection.ranges) }));
   }
@@ -108,6 +120,7 @@ export class WsGateway {
   }
 
   emitOutcomeBatch(): number {
+    if (this.bus.mode !== "local") return this.publishOutcomeBatch();
     let delivered = 0;
     for (const connection of this.connections.values()) for (const item of connection.subscribedTopics.values()) {
       const changes = this.board.mutateOutcomes(item, this.trackedIds(connection, item));
@@ -119,6 +132,7 @@ export class WsGateway {
   }
 
   emitCollectionBatch(): number {
+    if (this.bus.mode !== "local") return this.publishCollectionBatch();
     let delivered = 0;
     for (const connection of this.connections.values()) for (const item of connection.subscribedTopics.values()) {
       const delta = this.board.statusDelta(item, this.trackedIds(connection, item));
@@ -188,7 +202,13 @@ export class WsGateway {
   private resync(connection: ConnectionState, rawItems?: unknown[]): void {
     this.metrics.resync();
     const items = this.normalizeItems(connection, rawItems, "resync"); if (!items) return;
-    for (const item of items) connection.subscribedTopics.has(getTopicKey(item)) ? this.sendSnapshot(connection, item) : this.sendError(connection, "TOPIC_NOT_SUBSCRIBED", "Cannot resync a topic that is not subscribed", { item });
+    for (const item of items) {
+      if (!connection.subscribedTopics.has(getTopicKey(item))) {
+        this.sendError(connection, "TOPIC_NOT_SUBSCRIBED", "Cannot resync a topic that is not subscribed", { item });
+        continue;
+      }
+      void this.sendSnapshotFromCache(connection, item);
+    }
   }
 
   private watchRange(connection: ConnectionState, message: Extract<ClientMessage, { type: "watch_collection_range" }>): void {
@@ -205,7 +225,74 @@ export class WsGateway {
     const ids = rows.map((row) => String((row as { eventId: string }).eventId));
     this.setTrackedIds(connection, item, ids);
     const message: SnapshotMessage = { type: "topic_snapshot", protocolVersion: REALTIME_PROTOCOL_VERSION, streamId: connection.id, serverTime: nowIso(), traceId: traceId("snapshot"), item, seq: this.nextSeq(connection.id, item), collection: { ids, totalCount: this.board.list(item).length, truncated: ids.length < this.board.list(item).length }, rows };
+    void this.snapshots.set(`sports:realtime:snapshot:${getTopicKey(item)}`, JSON.stringify(message), this.config.distributed.snapshotTtlSeconds);
     this.send(connection.ws, message);
+  }
+
+  private async sendSnapshotFromCache(connection: ConnectionState, item: HomeBoardTopicItem): Promise<void> {
+    const key = `sports:realtime:snapshot:${getTopicKey(item)}`;
+    const cached = await this.snapshots.get(key).catch(() => null);
+    if (!cached) { this.sendSnapshot(connection, item); return; }
+    try {
+      const baseline = JSON.parse(cached) as SnapshotMessage;
+      const rows = Array.isArray(baseline.rows) ? baseline.rows : [];
+      const ids = rows.map((row) => isRecord(row) ? normalizeText(row.eventId || row.id) : "").filter(Boolean);
+      this.setTrackedIds(connection, item, ids);
+      this.send(connection.ws, { ...baseline, streamId: connection.id, serverTime: nowIso(), traceId: traceId("snapshot-cache"), item, seq: this.nextSeq(connection.id, item) });
+    } catch {
+      this.sendSnapshot(connection, item);
+    }
+  }
+
+  private async startDistributed(): Promise<void> {
+    if (this.distributedStarted) return;
+    try {
+      await this.bus.start((event) => this.deliverDistributedEvent(event));
+      this.distributedStarted = true;
+    } catch (error) {
+      console.error(`[mock-realtime] distributed runtime unavailable (${this.bus.mode})`, error);
+    }
+  }
+
+  private deliverDistributedEvent(event: RealtimeEvent): void {
+    for (const connection of this.connections.values()) {
+      const item = connection.subscribedTopics.get(event.topicKey);
+      if (!item) continue;
+      if (event.kind === "outcome") {
+        const changes = Array.isArray(event.payload.changes) ? event.payload.changes.filter((change) => {
+          if (!isRecord(change)) return false;
+          const tracked = this.trackedIds(connection, item);
+          return !tracked.length || tracked.includes(normalizeText(change.eventId));
+        }) : [];
+        if (!changes.length) continue;
+        this.send(connection.ws, { type: "outcome_delta", protocolVersion: REALTIME_PROTOCOL_VERSION, streamId: connection.id, serverTime: nowIso(), traceId: traceId("outcome"), item, seq: this.nextSeq(connection.id, item), changes });
+      } else {
+        const ops = Array.isArray(event.payload.ops) ? event.payload.ops : [];
+        this.send(connection.ws, { type: "topic_delta", protocolVersion: REALTIME_PROTOCOL_VERSION, streamId: connection.id, serverTime: nowIso(), traceId: traceId("topic"), item, seq: this.nextSeq(connection.id, item), ops });
+      }
+    }
+  }
+
+  private publishOutcomeBatch(): number {
+    const topics = new Map<string, HomeBoardTopicItem>();
+    for (const connection of this.connections.values()) for (const item of connection.subscribedTopics.values()) topics.set(getTopicKey(item), item);
+    for (const [topicKey, item] of topics) {
+      const changes = this.board.mutateOutcomes(item, []);
+      if (!changes.length) continue;
+      void this.bus.publish({ eventId: traceId("event"), originInstanceId: this.config.instanceId, topicKey, kind: "outcome", payload: { changes }, publishedAt: nowIso() });
+    }
+    return topics.size;
+  }
+
+  private publishCollectionBatch(): number {
+    const topics = new Map<string, HomeBoardTopicItem>();
+    for (const connection of this.connections.values()) for (const item of connection.subscribedTopics.values()) topics.set(getTopicKey(item), item);
+    for (const [topicKey, item] of topics) {
+      const delta = this.board.statusDelta(item, []);
+      if (!delta) continue;
+      void this.bus.publish({ eventId: traceId("event"), originInstanceId: this.config.instanceId, topicKey, kind: "topic", payload: { ops: delta.ops }, publishedAt: nowIso() });
+    }
+    return topics.size;
   }
 
   private emitOutcomeFor(connection: ConnectionState, item: HomeBoardTopicItem): void {

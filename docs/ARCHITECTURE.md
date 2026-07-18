@@ -14,9 +14,11 @@ realtime.ts
   sequence gate -> row registry -> outcome patch index
          |                              |
          +---------------+--------------+
-                         v
+                        v
                     OddsBoard.vue
 ```
+
+In a multi-instance deployment, the gateway-local producer publishes a domain event to Redis Pub/Sub or Kafka. Every gateway instance consumes the event, allocates a connection-local sequence, applies its own visible-range filter, and fans out to its local WebSocket connections. Redis also stores short-lived snapshots for resync recovery.
 
 The transport never imports UI code. The board never parses protocol messages. `realtime.ts` is the boundary that turns ordered protocol data into stable UI rows.
 
@@ -59,3 +61,5 @@ In production, intermediate prices for the same outcome should be coalesced to t
 - Keep visible live odds below 250ms end-to-end p95.
 
 The mock gateway exposes the implemented subset through `/health` and Prometheus-style `/metrics`. `pnpm test` covers protocol recovery, stable outcome identity, and backpressure boundaries; `pnpm benchmark` provides a repeatable lookup comparison.
+
+For Kafka, consumer groups are suffixed with the gateway instance ID. Sharing one group across gateway instances would load-balance events and break broadcast semantics.

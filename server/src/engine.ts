@@ -33,14 +33,15 @@ export class MockRealtimeEngine {
       heartbeatMs: this.config.heartbeatMs,
       connections: this.gateway.connectionCount(),
       topicsTracked: this.gateway.topicCount(),
+      distributedMode: this.gateway.distributedMode(),
       metrics: this.gateway.metricsSnapshot(),
       serverTime: nowIso(),
     };
   }
 
-  handleMetrics(ctx: Context): void {
+  async handleMetrics(ctx: Context): Promise<void> {
     ctx.type = "text/plain; version=0.0.4; charset=utf-8";
-    ctx.body = this.gateway.prometheusMetrics();
+    ctx.body = await this.gateway.prometheusMetrics();
   }
 
   handleDebugState(ctx: Context): void {

@@ -63,6 +63,9 @@ pnpm server
 
 # 检查服务状态
 curl http://127.0.0.1:8088/health
+
+# 查看 Prometheus 指标
+curl http://127.0.0.1:8088/metrics
 ```
 
 ## 协议
@@ -160,9 +163,22 @@ MOCK_REALTIME_MAX_CLIENT_MESSAGE_BYTES=16777216
 MOCK_REALTIME_MAX_SERVER_MESSAGE_BYTES=16777216
 MOCK_REALTIME_BUFFER_HIGH_WATER_BYTES=67108864
 MOCK_REALTIME_BUFFER_CLOSE_BYTES=268435456
+
+# 多实例运行时（默认不配置时使用进程内 bus / memory snapshot）
+MOCK_REALTIME_INSTANCE_ID=ws-a
+MOCK_REALTIME_REDIS_URL=redis://127.0.0.1:6379
+MOCK_REALTIME_REDIS_CHANNEL=sports:realtime:events
+
+# 或使用 Kafka 事件广播；每个实例会自动使用独立 consumer group
+MOCK_REALTIME_KAFKA_BROKERS=127.0.0.1:9092
+MOCK_REALTIME_KAFKA_TOPIC=sports.realtime.events
+MOCK_REALTIME_KAFKA_GROUP_ID=sports-realtime-gateway
+MOCK_REALTIME_SNAPSHOT_TTL_SECONDS=30
 ```
 
 本地 mock 默认不要求鉴权。启用认证时，请使用 `wss://`，并避免将凭证写入前端源码或日志。
+
+配置 `MOCK_REALTIME_REDIS_URL` 后，Redis 同时承担跨实例 Pub/Sub 和 snapshot TTL 缓存。配置 `MOCK_REALTIME_KAFKA_BROKERS` 后，Kafka 作为实时事件总线；每个网关实例使用带实例 ID 的独立 consumer group，确保同一事件广播到所有实例。Redis 和 Kafka 同时配置时优先使用 Kafka 事件总线，但仍使用 Redis snapshot store。
 
 ## 项目结构
 

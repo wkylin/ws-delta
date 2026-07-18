@@ -16,7 +16,7 @@ export function createRouter(options: RouteOptions): Router {
   const router = new Router();
 
   router.get("/health", (ctx) => engine.handleHealth(ctx));
-  router.get("/metrics", (ctx) => engine.handleMetrics(ctx));
+  router.get("/metrics", async (ctx) => engine.handleMetrics(ctx));
   router.get("/api/mock/realtime/state", (ctx) => engine.handleDebugState(ctx));
   router.get("/api/mock/realtime/debug/home-board", (ctx) =>
     engine.handleDebugHomeBoardQuery(ctx),

@@ -74,6 +74,52 @@ export class GatewayMetrics {
   }
 }
 
+/** Prometheus exporter kept separate from the domain counters for testability. */
+export class PrometheusExporter {
+  readonly registry = new Registry();
+  private readonly gauges = new Map<string, Gauge<string>>();
+
+  constructor() {
+    collectDefaultMetrics({ register: this.registry, prefix: "ws_realtime_" });
+  }
+
+  async render(metrics: GatewayMetricsSnapshot): Promise<string> {
+    const values: Record<string, number> = {
+      ws_realtime_uptime_seconds: metrics.uptimeSeconds,
+      ws_realtime_connections_opened_total: metrics.connectionsOpened,
+      ws_realtime_connections_closed_total: metrics.connectionsClosed,
+      ws_realtime_connections: metrics.currentConnections,
+      ws_realtime_subscriptions: metrics.currentSubscriptions,
+      ws_realtime_inbound_messages_total: metrics.inboundMessages,
+      ws_realtime_inbound_bytes_total: metrics.inboundBytes,
+      ws_realtime_outbound_messages_total: metrics.outboundMessages,
+      ws_realtime_outbound_bytes_total: metrics.outboundBytes,
+      ws_realtime_resync_requests_total: metrics.resyncRequests,
+      ws_realtime_sequence_gap_size_injected_total: metrics.sequenceGapSizeInjected,
+      ws_realtime_recoverable_messages_dropped_total: metrics.recoverableMessagesDropped,
+      ws_realtime_backpressure_notifications_total: metrics.backpressureNotifications,
+      ws_realtime_slow_consumer_disconnects_total: metrics.slowConsumerDisconnects,
+      ws_realtime_buffered_bytes: metrics.currentBufferedBytes,
+      ws_realtime_max_connection_buffered_bytes: metrics.maxConnectionBufferedBytes,
+    };
+    for (const [name, value] of Object.entries(values)) {
+      let gauge = this.gauges.get(name);
+      if (!gauge) {
+        gauge = new Gauge({ name, help: name.replaceAll("_", " "), registers: [this.registry] });
+        this.gauges.set(name, gauge);
+      }
+      gauge.set(value);
+    }
+    let byType = this.gauges.get("ws_realtime_outbound_messages_by_type_total");
+    if (!byType) {
+      byType = new Gauge({ name: "ws_realtime_outbound_messages_by_type_total", help: "Outbound messages by protocol type", labelNames: ["type"], registers: [this.registry] });
+      this.gauges.set("ws_realtime_outbound_messages_by_type_total", byType);
+    }
+    for (const [type, value] of Object.entries(metrics.outboundByType)) byType.set({ type }, value);
+    return this.registry.metrics();
+  }
+}
+
 export function formatPrometheusMetrics(metrics: GatewayMetricsSnapshot): string {
   const names: Array<[string, number]> = [
     ["ws_realtime_uptime_seconds", metrics.uptimeSeconds],
@@ -99,3 +145,4 @@ export function formatPrometheusMetrics(metrics: GatewayMetricsSnapshot): string
   }
   return `${lines.join("\n")}\n`;
 }
+import { collectDefaultMetrics, Gauge, Registry } from "prom-client";

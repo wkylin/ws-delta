@@ -19,6 +19,15 @@ export interface MockRealtimeConfig {
   bufferedAmountHighWaterBytes: number;
   bufferedAmountCloseBytes: number;
   maxRecoverableDrops: number;
+  instanceId: string;
+  distributed: {
+    redisUrl?: string;
+    kafkaBrokers: string[];
+    kafkaTopic: string;
+    kafkaGroupId: string;
+    channel: string;
+    snapshotTtlSeconds: number;
+  };
 }
 
 export interface BoardMarket {

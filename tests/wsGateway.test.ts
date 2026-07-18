@@ -36,6 +36,14 @@ function config(): MockRealtimeConfig {
     bufferedAmountHighWaterBytes: 10_000,
     bufferedAmountCloseBytes: 20_000,
     maxRecoverableDrops: 3,
+    instanceId: "test-instance",
+    distributed: {
+      kafkaBrokers: [],
+      kafkaTopic: "test.events",
+      kafkaGroupId: "test-group",
+      channel: "test-channel",
+      snapshotTtlSeconds: 30,
+    },
   };
 }
 

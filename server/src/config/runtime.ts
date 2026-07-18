@@ -60,6 +60,8 @@ export function loadRuntimeConfig(): RuntimeConfig {
     maxServerMessageBytes,
     numEnv("MOCK_REALTIME_BUFFER_HIGH_WATER_BYTES", 67_108_864),
   );
+  const instanceId = process.env.MOCK_REALTIME_INSTANCE_ID?.trim() || `ws_${process.pid}`;
+  const kafkaGroupPrefix = process.env.MOCK_REALTIME_KAFKA_GROUP_ID?.trim() || "sports-realtime-gateway";
 
   return {
     host: process.env.MOCK_REALTIME_HOST?.trim() || "0.0.0.0",
@@ -109,6 +111,16 @@ export function loadRuntimeConfig(): RuntimeConfig {
         1,
         numEnv("MOCK_REALTIME_MAX_RECOVERABLE_DROPS", 200),
       ),
+      instanceId,
+      distributed: {
+        redisUrl: process.env.MOCK_REALTIME_REDIS_URL?.trim() || undefined,
+        kafkaBrokers: csvEnv("MOCK_REALTIME_KAFKA_BROKERS", []),
+        kafkaTopic: process.env.MOCK_REALTIME_KAFKA_TOPIC?.trim() || "sports.realtime.events",
+        // Every gateway instance needs its own group so Kafka broadcasts to all instances.
+        kafkaGroupId: `${kafkaGroupPrefix}-${instanceId}`,
+        channel: process.env.MOCK_REALTIME_REDIS_CHANNEL?.trim() || "sports:realtime:events",
+        snapshotTtlSeconds: Math.max(1, numEnv("MOCK_REALTIME_SNAPSHOT_TTL_SECONDS", 30)),
+      },
     },
   };
 }
