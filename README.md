@@ -48,6 +48,18 @@ pnpm dev:frontend
 
 阿里云 ECS、Nginx、systemd、HTTPS/WSS 以及后续更新和回滚流程，参见 [阿里云 ECS 部署与更新手册](docs/DEPLOY_ALIYUN.md)。
 
+生产环境由 Nginx 提供 `dist`，不运行 `5180` 端口。生产构建必须显式设置 `VITE_WS_URL` 和 `VITE_METRICS_URL`；不要把普通 `pnpm build` 生成、仍指向 `127.0.0.1:8088` 的产物直接上传。完整升级、仅前端升级、验证和回滚命令均以部署手册为准。
+
+生产地址也可以配置在 `frontend/.env.production` 中。首次配置时复制示例文件：
+
+```bash
+cp frontend/.env.production.example frontend/.env.production
+```
+
+之后直接执行 `pnpm build` 就会加载生产地址。当前 `.env.production` 只包含公开的 WebSocket 和指标地址；私有覆盖配置请放在 `frontend/.env.production.local`，该文件已加入 `.gitignore`，不要将密钥写入仓库。
+
+升级前端时直接执行 `pnpm build`，然后将完整 `dist` 目录手动上传到服务器。不要只上传 `index.html` 或部分 `assets`；完整上传、服务器目录切换和回滚步骤见部署手册。
+
 ## 常用命令
 
 ```bash
