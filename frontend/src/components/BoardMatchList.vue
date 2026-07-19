@@ -1,10 +1,10 @@
 <template>
   <div v-if="!groups.length" class="board-empty">
-    <LoaderCircle v-if="status !== 'offline'" :size="22" class="spin" />
-    <WifiOff v-else :size="22" />
-    <strong>{{ status === "connected" ? "Hydrating board" : "Feed unavailable" }}</strong>
-    <span>{{ status === "connected" ? "Waiting for the first topic snapshot." : "Start the mock server on port 8088."
-      }}</span>
+    <WifiOff v-if="status === 'offline'" :size="22" />
+    <Inbox v-else-if="snapshotReceived" :size="22" />
+    <LoaderCircle v-else :size="22" class="spin" />
+    <strong>{{ emptyTitle }}</strong>
+    <span>{{ emptyDescription }}</span>
   </div>
 
   <div v-else class="league-list">
@@ -50,17 +50,28 @@
 </template>
 
 <script setup lang="ts">
-import { reactive } from "vue";
-import { ArrowDown, ArrowUp, CalendarClock, ChevronRight, LoaderCircle, Radio, WifiOff } from "lucide-vue-next";
+import { computed, reactive } from "vue";
+import { ArrowDown, ArrowUp, CalendarClock, ChevronRight, Inbox, LoaderCircle, Radio, WifiOff } from "lucide-vue-next";
 import type { BoardGroup, ConnectionStatus, MarketCell, Trend } from "../types";
 
 const props = defineProps<{
   groups: BoardGroup[];
   flashes: Record<string, Trend>;
+  snapshotReceived: boolean;
   status: ConnectionStatus;
 }>();
 
 const selected = reactive(new Set<string>());
+const emptyTitle = computed(() => {
+  if (props.status === "offline") return "Feed unavailable";
+  return props.snapshotReceived ? "No data" : "Hydrating board";
+});
+const emptyDescription = computed(() => {
+  if (props.status === "offline") return "Start the mock server on port 8088.";
+  return props.snapshotReceived
+    ? "No matches for the current filters."
+    : "Waiting for the first topic snapshot.";
+});
 
 function identity(rowId: string, market: MarketCell): string {
   return `${rowId}|${market.sourceMarketKey || ""}|${market.sourceOutcomeCode || market.key}`;

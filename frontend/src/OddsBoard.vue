@@ -1,7 +1,12 @@
 <template>
   <section class="odds-board">
     <BoardFilters :sports="sports" :active-topic="activeTopic" :status="status" @update-topic="emitTopic" />
-    <BoardMatchList :groups="groups" :flashes="flashes" :status="status" />
+    <BoardMatchList
+      :groups="groups"
+      :flashes="flashes"
+      :snapshot-received="snapshotReceived"
+      :status="status"
+    />
   </section>
 </template>
 
@@ -15,6 +20,7 @@ const props = defineProps<{
   sports: Array<{ id: string; label: string }>;
   activeTopic: TopicItem;
   flashes: Record<string, Trend>;
+  snapshotReceived: boolean;
   status: ConnectionStatus;
 }>();
 

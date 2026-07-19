@@ -91,6 +91,7 @@ export function useRealtimeBoard() {
     pageSize: 50,
   });
   const currentSeq = ref(0);
+  const snapshotReceived = ref(false);
   const streamId = ref("");
   const logs = ref<ProtocolLog[]>([]);
   const stats = reactive<RealtimeStats>({
@@ -164,6 +165,7 @@ export function useRealtimeBoard() {
 
   function subscribe() {
     currentSeq.value = 0;
+    snapshotReceived.value = false;
     rows.value = [];
     lookup.rebuild(rows.value);
     send({ type: "subscribe", items: [activeTopic.value] });
@@ -224,6 +226,7 @@ export function useRealtimeBoard() {
     nextSocket.onclose = (event) => {
       if (socket !== nextSocket) return;
       socket = null;
+      snapshotReceived.value = false;
       status.value = "offline";
       recordClose({
         code: event.code,
@@ -464,6 +467,7 @@ export function useRealtimeBoard() {
     }
 
     if (type === "topic_snapshot") {
+      snapshotReceived.value = true;
       stats.snapshots += 1;
       const count = registerRows(Array.isArray(message.rows) ? message.rows : []);
       if (isRecord(message.collection) && Array.isArray(message.collection.ids)) {
@@ -557,6 +561,7 @@ export function useRealtimeBoard() {
     reconnect,
     resetStats,
     rows,
+    snapshotReceived,
     sportOptions,
     stats,
     status,

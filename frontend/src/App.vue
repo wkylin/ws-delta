@@ -64,6 +64,7 @@
           :sports="sportOptions"
           :active-topic="activeTopic"
           :flashes="flashes"
+          :snapshot-received="snapshotReceived"
           :status="status"
           @update-topic="updateTopic"
         />
@@ -167,6 +168,7 @@ const {
   reconnect,
   resetStats,
   rows,
+  snapshotReceived,
   sportOptions,
   stats,
   status,
