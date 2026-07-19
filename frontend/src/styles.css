@@ -154,6 +154,38 @@ h2 {
   gap: 12px;
 }
 
+.view-switch {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.view-switch button {
+  min-width: 74px;
+  height: 27px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 2px;
+  color: var(--muted);
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.view-switch button:hover {
+  color: var(--text);
+}
+
+.view-switch button.is-active {
+  color: #07130e;
+  background: var(--green);
+  font-weight: 750;
+}
+
 .connection-state {
   display: inline-flex;
   align-items: center;

@@ -13,6 +13,11 @@
         </div>
       </div>
 
+      <nav class="view-switch" aria-label="Workspace view">
+        <button type="button" :class="{ 'is-active': view === 'board' }" @click="view = 'board'">Board</button>
+        <button type="button" :class="{ 'is-active': view === 'monitor' }" @click="view = 'monitor'">Monitor</button>
+      </nav>
+
       <div class="connection-strip">
         <span class="connection-state" :class="`is-${status}`">
           <span class="connection-state__dot" />
@@ -31,7 +36,7 @@
       </div>
     </header>
 
-    <main class="workspace">
+    <main v-if="view === 'board'" class="workspace">
       <section class="board-stage" aria-label="Realtime odds board">
         <div class="stage-heading">
           <div>
@@ -131,6 +136,8 @@
       </aside>
     </main>
 
+    <WebSocketMonitor v-else :status="status" />
+
     <footer class="statusbar">
       <span>sports-realtime.v1</span>
       <span>snapshot + structure delta + outcome delta</span>
@@ -140,10 +147,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { RefreshCw, Trash2 } from "lucide-vue-next";
 import OddsBoard from "./OddsBoard.vue";
 import GatewayMetrics from "./components/GatewayMetrics.vue";
+import WebSocketMonitor from "./components/WebSocketMonitor.vue";
 import { useRealtimeBoard } from "./realtime";
 
 const {
@@ -166,6 +174,7 @@ const {
   topicKey,
   updateTopic,
 } = useRealtimeBoard();
+const view = ref<"board" | "monitor">("board");
 
 const statusLabel = computed(() => {
   switch (status.value) {

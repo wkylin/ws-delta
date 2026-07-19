@@ -1,5 +1,13 @@
 import { computed, onBeforeUnmount, reactive, ref } from "vue";
 import { BoardLookupIndex } from "./boardLookupIndex";
+import {
+  incrementReconnect,
+  recordClose,
+  recordInbound,
+  recordLifecycle,
+  recordOutbound,
+  startTelemetrySession,
+} from "./wsTelemetry";
 import type {
   BoardRow,
   BoardGroup,
@@ -148,7 +156,9 @@ export function useRealtimeBoard() {
 
   function send(message: RecordValue) {
     if (socket?.readyState !== WebSocket.OPEN) return false;
-    socket.send(JSON.stringify(message));
+    const raw = JSON.stringify(message);
+    socket.send(raw);
+    recordOutbound(message, raw);
     return true;
   }
 
@@ -175,23 +185,39 @@ export function useRealtimeBoard() {
   function connect() {
     if (socket || stopped) return;
     status.value = reconnectAttempt ? "reconnecting" : "connecting";
+    recordLifecycle("connecting", reconnectAttempt ? "Reconnecting" : "Connecting", {
+      endpoint,
+      attempt: reconnectAttempt,
+    });
     const nextSocket = new WebSocket(endpoint);
     socket = nextSocket;
 
     nextSocket.onopen = () => {
       if (socket !== nextSocket) return;
+      const wasReconnect = reconnectAttempt > 0;
+      if (wasReconnect) startTelemetrySession(true);
       status.value = "connected";
       reconnectAttempt = 0;
+      recordLifecycle("open", "Transport open", { endpoint, reconnected: wasReconnect });
       addLog("open", 0, endpoint, undefined, "neutral");
       subscribe();
     };
 
     nextSocket.onmessage = (event) => {
       if (socket !== nextSocket || typeof event.data !== "string") return;
+      recordInbound(event.data);
       handleMessage(event.data);
     };
 
-    nextSocket.onerror = () => {
+    nextSocket.onerror = (event) => {
+      recordLifecycle("transport_error", "WebSocket transport error", {
+        eventType: event.type,
+        endpoint,
+        readyState: nextSocket.readyState,
+        bufferedAmount: nextSocket.bufferedAmount,
+        online: navigator.onLine,
+        visibilityState: document.visibilityState,
+      }, "error");
       addLog("transport", 0, "WebSocket transport error", undefined, "warning");
     };
 
@@ -199,6 +225,16 @@ export function useRealtimeBoard() {
       if (socket !== nextSocket) return;
       socket = null;
       status.value = "offline";
+      recordClose({
+        code: event.code,
+        reason: event.reason || "",
+        wasClean: event.wasClean,
+        endpoint,
+        streamId: streamId.value,
+        bufferedAmount: nextSocket.bufferedAmount,
+        online: navigator.onLine,
+        visibilityState: document.visibilityState,
+      });
       addLog(
         "close",
         0,
@@ -217,6 +253,7 @@ export function useRealtimeBoard() {
       RECONNECT_BASE_MS * 2 ** reconnectAttempt,
     );
     reconnectAttempt += 1;
+    incrementReconnect();
     status.value = "reconnecting";
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = null;
