@@ -44,6 +44,10 @@ pnpm dev:server
 pnpm dev:frontend
 ```
 
+## 部署
+
+阿里云 ECS、Nginx、systemd、HTTPS/WSS 以及后续更新和回滚流程，参见 [阿里云 ECS 部署与更新手册](docs/DEPLOY_ALIYUN.md)。
+
 ## 常用命令
 
 ```bash
