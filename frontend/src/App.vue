@@ -14,8 +14,8 @@
       </div>
 
       <nav class="view-switch" aria-label="Workspace view">
-        <button type="button" :class="{ 'is-active': view === 'board' }" @click="view = 'board'">Board</button>
-        <button type="button" :class="{ 'is-active': view === 'monitor' }" @click="view = 'monitor'">Monitor</button>
+        <button type="button" :class="{ 'is-active': view === 'board' }" @click="setView('board')">Board</button>
+        <button type="button" :class="{ 'is-active': view === 'monitor' }" @click="setView('monitor')">Monitor</button>
       </nav>
 
       <div class="connection-strip">
@@ -148,7 +148,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import { RefreshCw, Trash2 } from "lucide-vue-next";
 import OddsBoard from "./OddsBoard.vue";
 import GatewayMetrics from "./components/GatewayMetrics.vue";
@@ -176,7 +176,30 @@ const {
   topicKey,
   updateTopic,
 } = useRealtimeBoard();
-const view = ref<"board" | "monitor">("board");
+type WorkspaceView = "board" | "monitor";
+
+function viewFromLocation(): WorkspaceView {
+  return new URLSearchParams(window.location.search).get("view") === "monitor"
+    ? "monitor"
+    : "board";
+}
+
+const view = ref<WorkspaceView>(viewFromLocation());
+
+function setView(next: WorkspaceView) {
+  view.value = next;
+  const url = new URL(window.location.href);
+  if (next === "monitor") url.searchParams.set("view", "monitor");
+  else url.searchParams.delete("view");
+  window.history.replaceState(window.history.state, "", url);
+}
+
+function syncViewFromHistory() {
+  view.value = viewFromLocation();
+}
+
+window.addEventListener("popstate", syncViewFromHistory);
+onBeforeUnmount(() => window.removeEventListener("popstate", syncViewFromHistory));
 
 const statusLabel = computed(() => {
   switch (status.value) {

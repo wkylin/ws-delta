@@ -44,6 +44,12 @@ pnpm dev:server
 pnpm dev:frontend
 ```
 
+## 在线体验
+
+- 实时看板：[https://ws.wkylin.cn/](https://ws.wkylin.cn/)
+- WebSocket Monitor：[https://ws.wkylin.cn/?view=monitor](https://ws.wkylin.cn/?view=monitor)
+- Wkylin 主页：[https://wkylin.cn/](https://wkylin.cn/)
+
 ## 部署
 
 阿里云 ECS、Nginx、systemd、HTTPS/WSS 以及后续更新和回滚流程，参见 [阿里云 ECS 部署与更新手册](docs/DEPLOY_ALIYUN.md)。
